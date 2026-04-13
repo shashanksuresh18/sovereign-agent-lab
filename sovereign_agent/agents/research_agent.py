@@ -44,8 +44,8 @@ The agent picks up the new capability automatically — no other changes needed.
     ]
 """
 
-import json
 import os
+
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -86,7 +86,20 @@ TOOLS = [
 
 # Build the agent once at module load time.
 # Rebuilding it on every call would be wasteful.
-_agent = create_react_agent(llm, TOOLS)
+_agent = create_react_agent(
+    llm,
+    TOOLS,
+    prompt=(
+        "You are a careful Edinburgh venue research assistant. "
+        "Always use the available tools to gather facts before responding. "
+        "Never answer by inventing tool results or by describing tool calls as text. "
+        "Work step by step and call one tool at a time when needed. "
+        "Do not repeat the same successful tool call with the same arguments. "
+        "If multiple venues qualify, pick one venue and continue with that venue only. "
+        "If you have already checked the known venues and none meets the constraints, "
+        "say clearly that none of the known venues can satisfy the request."
+    ),
+)
 
 
 # ─── Public interface ─────────────────────────────────────────────────────────
@@ -115,23 +128,48 @@ def run_research_agent(task: str, max_turns: int = 8) -> dict:
     )
 
     tool_calls_made = []
-    full_trace      = []
-    final_answer    = ""
+    full_trace = []
+    final_answer = ""
 
     for m in result["messages"]:
-        role    = getattr(m, "type", "unknown")
+        role = getattr(m, "type", "unknown")
         content = m.content
+        tool_calls = getattr(m, "tool_calls", None) or []
+
+        if tool_calls:
+            for tc in tool_calls:
+                entry = {
+                    "tool": tc["name"],
+                    "args": tc.get("args", {}),
+                }
+                tool_calls_made.append(entry)
+                full_trace.append({"role": "tool_call", **entry})
 
         # Tool-call messages have structured list content
         if isinstance(content, list):
+            text_parts = []
+
+            if not tool_calls:
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        entry = {
+                            "tool": block["name"],
+                            "args": block.get("input", {}),
+                        }
+                        tool_calls_made.append(entry)
+                        full_trace.append({"role": "tool_call", **entry})
+
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    entry = {
-                        "tool": block["name"],
-                        "args": block.get("input", {}),
-                    }
-                    tool_calls_made.append(entry)
-                    full_trace.append({"role": "tool_call", **entry})
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") in {"text", "output_text"} and block.get("text"):
+                    text_parts.append(block["text"])
+
+            if text_parts:
+                text_content = "\n".join(text_parts)
+                full_trace.append({"role": role, "content": text_content})
+                if role == "ai":
+                    final_answer = text_content
             continue
 
         if content:
@@ -140,8 +178,8 @@ def run_research_agent(task: str, max_turns: int = 8) -> dict:
                 final_answer = str(content)
 
     return {
-        "final_answer":    final_answer,
+        "final_answer": final_answer,
         "tool_calls_made": tool_calls_made,
-        "full_trace":      full_trace,
-        "success":         bool(final_answer),
+        "full_trace": full_trace,
+        "success": bool(final_answer),
     }

@@ -8,8 +8,8 @@ It will be imported by your research agent in Exercise 2,
 and the same tools will be exposed via MCP in Exercise 4.
 
 In Week 2 you will ADD more tools to this file (web_search, file_ops).
-The interface you establish here — each tool as a @tool decorated function
-returning a JSON string — stays the same throughout the course.
+The interface you establish here - each tool as a @tool decorated function
+returning a JSON string - stays the same throughout the course.
 
 WHY TOOLS RETURN JSON STRINGS
 ------------------------------
@@ -19,8 +19,8 @@ JSON strings are:
   - Consistent (always the same shape, success or failure)
   - Type-preserving (integers stay integers, booleans stay booleans)
 
-Never return a plain string like "The pub is full." — the model can't
-reliably extract structured data from that. Never raise an exception —
+Never return a plain string like "The pub is full." - the model can't
+reliably extract structured data from that. Never raise an exception -
 that crashes the agent loop. Always return a structured dict as a JSON string.
 
 WEEK 1 TASK
@@ -29,19 +29,22 @@ These functions are provided as working stubs. Your task in Exercise 2
 is to use them inside a LangGraph agent, not to modify them here.
 
 The one thing you WILL do here: make sure you understand what each function
-returns and when it returns an error — because the agent's ability to reason
+returns and when it returns an error - because the agent's ability to reason
 about failures depends entirely on what these functions return.
 """
 
 import json
+import os
+
 import requests
 from langchain_core.tools import tool
+from openai import OpenAI
 
-# ─── Venue database ───────────────────────────────────────────────────────────
+# --- Venue database -----------------------------------------------------------
 # In Week 2 this gets replaced with a real web search.
 # For now, it's a small hardcoded database so we can focus on the agent loop.
 #
-# Key design note: The Bow Bar has status="full". This is intentional —
+# Key design note: The Bow Bar has status="full". This is intentional -
 # it creates a realistic failure case for the agent to navigate.
 
 VENUES = {
@@ -82,16 +85,18 @@ def check_pub_availability(
     Check if a named Edinburgh pub meets capacity and dietary requirements.
     Returns whether ALL constraints are met, plus full venue details.
     Use this after you already have a specific venue name to evaluate.
-    Do NOT use this to browse or search — you must already know the pub name.
+    Do NOT use this to browse or search - you must already know the pub name.
     Known venues: The Albanach, The Haymarket Vaults, The Guilford Arms, The Bow Bar.
     """
     venue = VENUES.get(pub_name)
     if not venue:
-        return json.dumps({
-            "success": False,
-            "error": f"Venue not found: '{pub_name}'",
-            "known_venues": list(VENUES.keys()),
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Venue not found: '{pub_name}'",
+                "known_venues": list(VENUES.keys()),
+            }
+        )
 
     meets_all = (
         venue["capacity"] >= required_capacity
@@ -99,15 +104,17 @@ def check_pub_availability(
         and venue["status"] == "available"
     )
 
-    return json.dumps({
-        "success": True,
-        "pub_name": pub_name,
-        "address": venue["address"],
-        "capacity": venue["capacity"],
-        "vegan": venue["vegan"],
-        "status": venue["status"],
-        "meets_all_constraints": meets_all,
-    })
+    return json.dumps(
+        {
+            "success": True,
+            "pub_name": pub_name,
+            "address": venue["address"],
+            "capacity": venue["capacity"],
+            "vegan": venue["vegan"],
+            "status": venue["status"],
+            "meets_all_constraints": meets_all,
+        }
+    )
 
 
 @tool
@@ -133,17 +140,26 @@ def get_edinburgh_weather() -> str:
         data = resp.json().get("current", {})
         code = data.get("weather_code", -1)
         descriptions = {
-            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy",
-            3: "Overcast", 45: "Fog", 61: "Light rain", 63: "Moderate rain",
-            65: "Heavy rain", 80: "Rain showers", 95: "Thunderstorm",
+            0: "Clear sky",
+            1: "Mainly clear",
+            2: "Partly cloudy",
+            3: "Overcast",
+            45: "Fog",
+            61: "Light rain",
+            63: "Moderate rain",
+            65: "Heavy rain",
+            80: "Rain showers",
+            95: "Thunderstorm",
         }
-        return json.dumps({
-            "success": True,
-            "temp_c": data.get("temperature_2m"),
-            "description": descriptions.get(code, f"Code {code}"),
-            "precipitation_mm": data.get("precipitation"),
-            "outdoor_ok": code in {0, 1, 2},
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "temp_c": data.get("temperature_2m"),
+                "description": descriptions.get(code, f"Code {code}"),
+                "precipitation_mm": data.get("precipitation"),
+                "outdoor_ok": code in {0, 1, 2},
+            }
+        )
     except requests.exceptions.Timeout:
         return json.dumps({"success": False, "error": "Weather API timed out"})
     except Exception as exc:
@@ -158,16 +174,21 @@ def calculate_catering_cost(guests: int, price_per_head_gbp: float) -> str:
     Returns total_cost_gbp, guests, and price_per_head_gbp.
     """
     if guests <= 0 or price_per_head_gbp < 0:
-        return json.dumps({
-            "success": False,
-            "error": "guests must be > 0 and price_per_head_gbp must be >= 0",
-        })
-    return json.dumps({
-        "success": True,
-        "guests": guests,
-        "price_per_head_gbp": price_per_head_gbp,
-        "total_cost_gbp": round(guests * price_per_head_gbp, 2),
-    })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "guests must be > 0 and price_per_head_gbp must be >= 0",
+            }
+        )
+
+    return json.dumps(
+        {
+            "success": True,
+            "guests": guests,
+            "price_per_head_gbp": price_per_head_gbp,
+            "total_cost_gbp": round(guests * price_per_head_gbp, 2),
+        }
+    )
 
 
 @tool
@@ -180,46 +201,49 @@ def generate_event_flyer(venue_name: str, guest_count: int, event_theme: str) ->
     guest_count: confirmed number of attendees
     event_theme: short description, e.g. 'AI Meetup, professional, Scottish'
     """
-    # ── TODO: Replace this stub with a real images.generate() call ───────────
-    #
-    # 1. Import OpenAI at the top of this file:
-    #      from openai import OpenAI
-    #      import os
-    #
-    # 2. Create the client:
-    #      client = OpenAI(
-    #          base_url="https://api.tokenfactory.nebius.com/v1/",
-    #          api_key=os.getenv("NEBIUS_KEY"),
-    #      )
-    #
-    # 3. Build the prompt — include venue name, guest count, event theme:
-    #      prompt = (
-    #          f"Professional event flyer for {event_theme} at {venue_name}, "
-    #          f"Edinburgh. {guest_count} guests tonight. Warm lighting, "
-    #          f"Scottish architecture background, clean modern typography."
-    #      )
-    #
-    # 4. Call the image API:
-    #      response = client.images.generate(
-    #          model="black-forest-labs/flux-schnell",
-    #          prompt=prompt,
-    #          n=1,
-    #      )
-    #      url = response.data[0].url
-    #
-    # 5. Return a dict with at minimum: success, prompt_used, image_url
-    #    On failure, return: success=False, error=str(e), prompt_used, image_url=""
-    #
-    # When implemented, the mechanical check in grade.py will pass automatically.
-    # ──────────────────────────────────────────────────────────────────────────
-
     prompt = (
         f"Professional event flyer for {event_theme} at {venue_name}, "
-        f"Edinburgh. {guest_count} guests."
+        f"Edinburgh. {guest_count} guests tonight. Warm lighting, "
+        f"Scottish architecture background, clean modern typography."
     )
-    return json.dumps({
-        "success": False,
-        "error": "STUB — see TODO in sovereign_agent/tools/venue_tools.py",
-        "prompt_used": prompt,
-        "image_url": "",
-    })
+
+    try:
+        client = OpenAI(
+            base_url="https://api.tokenfactory.nebius.com/v1/",
+            api_key=os.getenv("NEBIUS_KEY"),
+            timeout=90,
+            max_retries=1,
+        )
+        response = client.images.generate(
+            model="black-forest-labs/flux-schnell",
+            prompt=prompt,
+            n=1,
+        )
+        image_url = response.data[0].url if response.data else ""
+
+        if not image_url:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Image generation returned no URL",
+                    "prompt_used": prompt,
+                    "image_url": "",
+                }
+            )
+
+        return json.dumps(
+            {
+                "success": True,
+                "prompt_used": prompt,
+                "image_url": image_url,
+            }
+        )
+    except Exception as exc:
+        return json.dumps(
+            {
+                "success": False,
+                "error": str(exc),
+                "prompt_used": prompt,
+                "image_url": "",
+            }
+        )

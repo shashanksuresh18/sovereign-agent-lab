@@ -97,6 +97,7 @@ async def discover_tools(server_script: str) -> list:
                     func=_make_mcp_caller(t.name, server_script),
                     name=t.name,
                     description=t.description or f"MCP tool: {t.name}",
+                    args_schema=t.inputSchema,
                 )
                 tools.append(lc_tool)
             return tools, [t.name for t in raw.tools]
@@ -107,13 +108,41 @@ async def discover_tools(server_script: str) -> list:
 def extract_trace(result: dict) -> list:
     trace = []
     for m in result["messages"]:
-        role    = getattr(m, "type", "unknown")
+        role = getattr(m, "type", "unknown")
         content = m.content
+        tool_calls = getattr(m, "tool_calls", None) or []
+
+        if tool_calls:
+            for tc in tool_calls:
+                trace.append(
+                    {
+                        "role": "tool_call",
+                        "tool": tc["name"],
+                        "args": tc.get("args", {}),
+                    }
+                )
+
         if isinstance(content, list):
+            text_parts = []
+
+            if not tool_calls:
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        trace.append(
+                            {
+                                "role": "tool_call",
+                                "tool": block["name"],
+                                "args": block.get("input", {}),
+                            }
+                        )
+
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    trace.append({"role": "tool_call", "tool": block["name"],
-                                  "args": block.get("input", {})})
+                if isinstance(block, dict) and block.get("type") in {"text", "output_text"}:
+                    if block.get("text"):
+                        text_parts.append(block["text"])
+
+            if text_parts:
+                trace.append({"role": role, "content": "\n".join(text_parts)})
         elif content:
             trace.append({"role": role, "content": str(content)})
     return trace
@@ -145,7 +174,17 @@ async def main() -> None:
     tools, tool_names = await discover_tools(SERVER_SCRIPT)
     print(f"\n  Discovered {len(tools)} tools: {tool_names}")
 
-    agent  = create_react_agent(llm, tools)
+    agent = create_react_agent(
+        llm,
+        tools,
+        prompt=(
+            "You are a careful Edinburgh venue assistant using MCP tools. "
+            "Always use the available tools to gather facts before answering. "
+            "Do not describe tool calls as text or invent tool outputs. "
+            "Use search_venues first to find candidates, then get_venue_details "
+            "for the venue you choose. If no venue qualifies, say so clearly."
+        ),
+    )
     output = {"server_script": SERVER_SCRIPT, "tools_discovered": tool_names, "queries": {}}
 
     # ── Query 1: search + detail fetch ────────────────────────────────────────
